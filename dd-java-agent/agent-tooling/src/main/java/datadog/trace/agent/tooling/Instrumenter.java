@@ -4,17 +4,25 @@ import static datadog.trace.agent.tooling.ByteBuddyElementMatchers.failSafe;
 import static datadog.trace.agent.tooling.Utils.getConfigEnabled;
 import static net.bytebuddy.matcher.ElementMatchers.any;
 
+import datadog.trace.agent.tooling.context.ContextVisitor;
+import datadog.trace.agent.tooling.context.InstrumentationContextStore;
 import datadog.trace.agent.tooling.muzzle.Reference;
 import datadog.trace.agent.tooling.muzzle.ReferenceMatcher;
 import java.security.ProtectionDomain;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import net.bytebuddy.agent.builder.AgentBuilder;
+import net.bytebuddy.asm.MemberSubstitution;
 import net.bytebuddy.description.type.TypeDescription;
+import net.bytebuddy.dynamic.DynamicType;
+import net.bytebuddy.implementation.auxiliary.MethodCallProxy;
+import net.bytebuddy.implementation.bytecode.StackManipulation;
+import net.bytebuddy.implementation.bytecode.assign.Assigner;
 import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.utility.JavaModule;
 
@@ -42,6 +50,9 @@ public interface Instrumenter {
 
   /** @return Class names of helpers to inject into the user's classloader */
   String[] helperClassNames();
+
+  /** TODO: document **/
+  Map<ElementMatcher<TypeDescription>, Class<? extends InstrumentationContextStore>> contextStore();
 
   Map<ElementMatcher, String> transformers();
 
@@ -82,6 +93,7 @@ public interface Instrumenter {
         return parentAgentBuilder;
       }
 
+      // matcher for each
       AgentBuilder.Identified.Extendable agentBuilder =
           parentAgentBuilder
               .type(
@@ -112,11 +124,21 @@ public interface Instrumenter {
         AgentBuilder.Identified.Extendable agentBuilder) {
       for (final Map.Entry<ElementMatcher, String> entry : transformers().entrySet()) {
         agentBuilder =
-            agentBuilder.transform(
+            agentBuilder
+              .transform(new AgentBuilder.Transformer() {
+                @Override
+                public DynamicType.Builder<?> transform(DynamicType.Builder<?> builder, TypeDescription typeDescription, ClassLoader classLoader, JavaModule module) {
+                  // TODO: remap context store access
+                  return builder.visit(new ContextVisitor(entry.getKey()));
+                }
+              })
+              .transform(
                 new AgentBuilder.Transformer.ForAdvice()
                     .include(Utils.getAgentClassLoader())
                     .withExceptionHandler(ExceptionHandlers.defaultExceptionHandler())
-                    .advice(entry.getKey(), entry.getValue()));
+                    .advice(entry.getKey(), entry.getValue())
+            )
+        ;
       }
       return agentBuilder;
     }
@@ -174,6 +196,11 @@ public interface Instrumenter {
     @Override
     public String[] helperClassNames() {
       return new String[0];
+    }
+
+    @Override
+    public Map<ElementMatcher<TypeDescription>, Class<? extends InstrumentationContextStore>> contextStore() {
+      return Collections.EMPTY_MAP;
     }
 
     @Override

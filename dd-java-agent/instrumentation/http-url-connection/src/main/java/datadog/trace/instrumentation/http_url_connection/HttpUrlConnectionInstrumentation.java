@@ -10,6 +10,7 @@ import static net.bytebuddy.matcher.ElementMatchers.not;
 
 import com.google.auto.service.AutoService;
 import datadog.trace.agent.tooling.Instrumenter;
+import datadog.trace.agent.tooling.context.InstrumentationContextStore;
 import datadog.trace.api.DDSpanTypes;
 import datadog.trace.api.DDTags;
 import datadog.trace.bootstrap.CallDepthThreadLocalMap;
@@ -49,7 +50,13 @@ public class HttpUrlConnectionInstrumentation extends Instrumenter.Default {
 
   @Override
   public String[] helperClassNames() {
-    return new String[] {HttpUrlConnectionInstrumentation.class.getName() + "$HttpURLState"};
+    return new String[] { InstrumentationContextStore.class.getName(),
+      HttpUrlConnectionInstrumentation.class.getName() + "$HttpURLState"};
+  }
+
+  @Override
+  public Map<ElementMatcher<TypeDescription>, Class<? extends InstrumentationContextStore>> contextStore() {
+    return Collections.<ElementMatcher<TypeDescription>, Class<? extends InstrumentationContextStore>>singletonMap(typeMatcher(), HttpURLState.class);
   }
 
   @Override
@@ -70,6 +77,8 @@ public class HttpUrlConnectionInstrumentation extends Instrumenter.Default {
         @Advice.Origin("#m") final String methodName) {
 
       final HttpURLState state = HttpURLState.get(thiz);
+      final HttpURLState magicstate = InstrumentationContextStore.get(thiz, HttpURLState.class);
+
       String operationName = "http.request";
 
       switch (methodName) {
@@ -176,7 +185,7 @@ public class HttpUrlConnectionInstrumentation extends Instrumenter.Default {
     }
   }
 
-  public static class HttpURLState {
+  public static class HttpURLState extends InstrumentationContextStore {
     private static final WeakMap<HttpURLConnection, HttpURLState> STATE_MAP = newWeakMap();
 
     public static HttpURLState get(final HttpURLConnection connection) {
